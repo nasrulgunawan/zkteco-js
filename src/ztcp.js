@@ -69,6 +69,7 @@ class ZTCP {
         try {
             const reply = await this.executeCmd(COMMANDS.CMD_CONNECT, '');
             if (reply) {
+                console.log('Connection successful', reply);
                 // Connection successful
                 return true;
             } else {
@@ -79,6 +80,61 @@ class ZTCP {
             // Log the error for debugging, if necessary
             console.error('Failed to connect:', err);
             // Re-throw the error for handling by the caller
+            throw err;
+        }
+    }
+
+    async connectWithAuth(password) {
+        try {
+            // Reset session and reply IDs
+            this.sessionId = 0;
+            this.replyId = 0;
+
+            // First establish a connection
+            await this.connect();
+
+            // Hash the password using SHA-256
+            const crypto = require('crypto');
+            const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+
+            // Create a buffer for the hashed password with proper length
+            const passwordBuffer = Buffer.alloc(64); // SHA-256 produces 64 hex characters
+            passwordBuffer.write(hashedPassword, 0);
+
+            // Add a timestamp to prevent replay attacks
+            const timestamp = Buffer.alloc(8);
+            timestamp.writeBigInt64LE(BigInt(Date.now()), 0);
+
+            // Combine password and timestamp
+            const authBuffer = Buffer.concat([passwordBuffer, timestamp]);
+
+            // Send authentication command with hashed password and timestamp
+            const reply = await this.executeCmd(COMMANDS.CMD_AUTH, authBuffer);
+
+            if (reply) {
+                // Verify the response integrity
+                if (reply.length < 6) {
+                    throw new Error('INVALID_AUTH_RESPONSE');
+                }
+
+                // Extract and verify session ID
+                const receivedSessionId = reply.readUInt16LE(4);
+                if (receivedSessionId === 0) {
+                    throw new Error('INVALID_SESSION_ID');
+                }
+
+                // Store the session ID
+                this.sessionId = receivedSessionId;
+
+                // Store the authentication timestamp for session validation
+                this.authTimestamp = Date.now();
+
+                return true;
+            } else {
+                throw new Error('NO_REPLY_ON_CMD_AUTH');
+            }
+        } catch (err) {
+            console.error('Failed to authenticate:', err);
             throw err;
         }
     }
@@ -1098,6 +1154,28 @@ class ZTCP {
             // Handle errors and reject the promise
             console.error('Error getting real-time logs:', err);
             throw err;
+        }
+    }
+
+    async validateSession() {
+        try {
+            // Check if session exists and is not expired
+            if (!this.sessionId || !this.authTimestamp) {
+                return false;
+            }
+
+            // Check if session is expired (30 minutes)
+            const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes in milliseconds
+            if (Date.now() - this.authTimestamp > SESSION_TIMEOUT) {
+                return false;
+            }
+
+            // Verify session is still valid with the device
+            const reply = await this.executeCmd(COMMANDS.CMD_ACK_OK, '');
+            return reply && reply.length >= 6 && reply.readUInt16LE(4) === this.sessionId;
+        } catch (err) {
+            console.error('Session validation failed:', err);
+            return false;
         }
     }
 

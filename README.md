@@ -85,7 +85,36 @@ manageZktecoDevice();
 Please see [CONTRIBUTING](https://github.com/coding-libs/zkteco-js/graphs/contributors) for details.
 ## Security
 
-If you've found a bug regarding security please mail [codinglibs4u@gmail.com](mailto:codinglibs4u@gmail.com) instead of using the issue tracker.
+### Authentication
+The library now implements secure authentication with the following features:
+- Password hashing using SHA-256
+- Protection against replay attacks using timestamps
+- Session management with automatic expiration
+- Environment variable based password configuration
+
+To use the library securely:
+1. Set your device password in the environment variable `ZKTECO_PASSWORD`
+2. Never hardcode passwords in your application
+3. Regularly rotate your device passwords
+4. Use strong passwords that meet security requirements
+
+Example of setting up secure authentication:
+```bash
+# Set the device password in environment variable
+export ZKTECO_PASSWORD="your-secure-password"
+
+# Or in your application
+process.env.ZKTECO_PASSWORD = "your-secure-password";
+```
+
+### Security Best Practices
+- Keep your device firmware updated to the latest version
+- Use a secure network connection (VPN or dedicated network)
+- Regularly monitor device logs for suspicious activity
+- Implement proper access controls and user management
+- Follow the principle of least privilege when assigning user roles
+
+If you've found a security vulnerability, please report it to [codinglibs4u@gmail.com](mailto:codinglibs4u@gmail.com) instead of using the issue tracker.
 
 ## Alternatives
 

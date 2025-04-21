@@ -79,7 +79,14 @@ class ZktecoJs {
                 // Attempt to create and connect TCP socket
                 try {
                     await this.ztcp.createSocket(cbErr, cbClose);
-                    await this.ztcp.connect();
+
+                    // Get password from environment variable or configuration
+                    const password = process.env.ZKTECO_PASSWORD || '';
+                    if (!password) {
+                        throw new Error('ZKTECO_PASSWORD environment variable is not set');
+                    }
+
+                    await this.ztcp.connectWithAuth(password);
                     console.log('TCP connection successful');
                     this.connectionType = 'tcp';
                     return true; // Return true if TCP connection is successful
@@ -88,42 +95,7 @@ class ZktecoJs {
                 }
             }
         } catch (err) {
-            // Attempt to disconnect TCP if there was an error
-            try {
-                if (this.ztcp.socket) await this.ztcp.disconnect();
-            } catch (disconnectErr) {
-                // Log or handle disconnection error if needed
-            }
-
-            if (err.code !== ERROR_TYPES.ECONNREFUSED) {
-                return Promise.reject(new ZkError(err, 'TCP CONNECT', this.ip));
-            }
-
-            // Try to establish UDP connection if TCP fails
-            try {
-                if (!this.zudp.socket) {
-                    await this.zudp.createSocket(cbErr, cbClose);
-                }
-                await this.zudp.connect();
-                console.log('UDP connection successful');
-                this.connectionType = 'udp';
-                return true; // Return true if UDP connection is successful
-            } catch (err) {
-                // Handle UDP connection error
-                if (err.code !== 'EADDRINUSE') {
-                    this.connectionType = null;
-                    try {
-                        await this.zudp.disconnect();
-                    } catch (disconnectErr) {
-                        // Log or handle disconnection error if needed
-                    }
-                    return Promise.reject(new ZkError(err, 'UDP CONNECT', this.ip));
-                }
-
-                // Handle EADDRINUSE specifically
-                this.connectionType = 'udp';
-                return true; // Return true if UDP connection is successful after handling EADDRINUSE error
-            }
+            throw new ZkError(err, 'SOCKET_CREATE', this.ip);
         }
     }
 
