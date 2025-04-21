@@ -73,7 +73,9 @@ module.exports.createUDPHeader = (command, sessionId, replyId, data) => {
 }
 
 module.exports.createTCPHeader = (command, sessionId, replyId, data) => {
-    const dataBuffer = Buffer.from(data);
+    // Convert data to string if it's a number
+    const dataStr = typeof data === 'number' ? data.toString() : data;
+    const dataBuffer = Buffer.from(dataStr);
     const buf = Buffer.alloc(8 + dataBuffer.length);
 
     buf.writeUInt16LE(command, 0);

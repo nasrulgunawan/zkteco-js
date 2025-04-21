@@ -610,6 +610,110 @@ class ZUDP {
         }
     }
 
+    async setUser(uid, userid, name, password, role = 0, cardno = 0) {
+        try {
+            // Validate input parameters
+            if (
+                parseInt(uid) <= 0 || parseInt(uid) > 3000 ||
+                userid.length > 9 ||
+                name.length > 24 ||
+                password.length > 8 ||
+                cardno.toString().length > 10
+            ) {
+                throw new Error('Invalid input parameters');
+            }
+
+            // Allocate and initialize the buffer
+            const commandBuffer = Buffer.alloc(72);
+
+            // Fill the buffer with user data
+            commandBuffer.writeUInt16LE(parseInt(uid), 0);
+            commandBuffer.writeUInt16LE(role, 2);
+            commandBuffer.write(password.padEnd(8, '\0'), 3, 8); // Ensure password is 8 bytes
+            commandBuffer.write(name.padEnd(24, '\0'), 11, 24); // Ensure name is 24 bytes
+            commandBuffer.writeUInt16LE(parseInt(cardno), 35);
+            commandBuffer.writeUInt32LE(0, 40); // Placeholder or reserved field
+            commandBuffer.write(userid.padEnd(9, '\0'), 48, 9); // Ensure userid is 9 bytes
+
+            // Send the command and return the result
+            return await this.executeCmd(COMMANDS.CMD_USER_WRQ, commandBuffer);
+
+        } catch (err) {
+            // Log error details for debugging
+            console.error('Error setting user:', err);
+
+            // Re-throw error for upstream handling
+            throw err;
+        }
+    }
+
+    /**
+     * Register a user's face on the device
+     * @param {string} userId - The user ID to register the face for
+     * @returns {Promise<boolean>} - Returns true if successful
+     */
+    async registerFace(userId) {
+        try {
+            // Validate input parameter
+            if (!userId || userId.length > 9) {
+                throw new Error('Invalid user ID');
+            }
+
+            // Create a buffer for the user ID
+            const commandBuffer = Buffer.alloc(9);
+            commandBuffer.write(userId.padEnd(9, '\0'), 0, 9);
+
+            // Send the command to start face enrollment
+            const reply = await this.executeCmd(COMMANDS.CMD_STARTENROLL, commandBuffer);
+
+            // Check if the reply indicates success
+            if (reply && reply.length >= 6) {
+                // The device will now be in face enrollment mode
+                // The user should position their face in front of the device
+                // The device will capture the face data automatically
+
+                // Wait for a short time to allow the device to process
+                await new Promise(resolve => setTimeout(resolve, 5000));
+
+                // Return success
+                return true;
+            } else {
+                throw new Error('Failed to start face enrollment');
+            }
+        } catch (err) {
+            // Log error details for debugging
+            console.error('Error registering face:', err);
+
+            // Re-throw error for upstream handling
+            throw err;
+        }
+    }
+
+    async deleteUser(uid) {
+        try {
+            // Validate input parameter
+            if (parseInt(uid) <= 0 || parseInt(uid) > 3000) {
+                throw new Error('Invalid UID: must be between 1 and 3000');
+            }
+
+            // Allocate and initialize the buffer
+            const commandBuffer = Buffer.alloc(72);
+
+            // Write UID to the buffer
+            commandBuffer.writeUInt16LE(parseInt(uid), 0);
+
+            // Send the delete command and return the result
+            return await this.executeCmd(COMMANDS.CMD_DELETE_USER, commandBuffer);
+
+        } catch (err) {
+            // Log error details for debugging
+            console.error('Error deleting user:', err);
+
+            // Re-throw error for upstream handling
+            throw err;
+        }
+    }
+
 }
 
 

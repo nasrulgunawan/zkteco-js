@@ -1050,6 +1050,60 @@ class ZTCP {
         }
     }
 
+    /**
+     * Register a user's face on the device
+     * @param {string} userId - The user ID to register the face for
+     * @returns {Promise<boolean>} - Returns true if successful
+     */
+    async registerFace(userId) {
+        try {
+            // Validate input parameter
+            if (!userId || userId.length > 9) {
+                throw new Error('Invalid user ID');
+            }
+
+            // Create a buffer for the user ID
+            const commandBuffer = Buffer.alloc(24);
+
+            // Write user ID to the buffer (first 9 bytes)
+            commandBuffer.write(userId.padEnd(9, '\0'), 0, 9);
+
+            // Set flag for face registration (byte at position 9)
+            commandBuffer.writeUInt8(50, 9); // Flag for face registration
+
+            // Additional parameters for face quality and timeout
+            commandBuffer.writeUInt16LE(70, 10); // Face quality threshold
+            commandBuffer.writeUInt16LE(15000, 12); // Timeout in milliseconds
+
+            // Send the command to start face enrollment with enhanced parameters
+            const reply = await this.executeCmd(COMMANDS.CMD_STARTENROLL, commandBuffer);
+
+            // Check if the reply indicates success
+            if (reply && reply.length >= 8) {
+                console.log('Face registration initiated, waiting for device to process...');
+
+                // Wait longer for the device to complete the face capture process
+                await new Promise(resolve => setTimeout(resolve, 5000));
+
+                // Send a follow-up command to confirm registration
+                const confirmBuffer = Buffer.alloc(9);
+                confirmBuffer.write(userId.padEnd(9, '\0'), 0, 9);
+                await this.executeCmd(COMMANDS.CMD_REFRESHDATA, confirmBuffer);
+
+                console.log('Face registration process completed');
+                return true;
+            } else {
+                throw new Error('Failed to start face enrollment - device did not acknowledge');
+            }
+        } catch (err) {
+            // Log error details for debugging
+            console.error('Error registering face:', err);
+
+            // Re-throw error for upstream handling
+            throw err;
+        }
+    }
+
     async deleteUser(uid) {
         try {
             // Validate input parameter
@@ -1157,6 +1211,47 @@ class ZTCP {
         }
     }
 
+    async getSocketStatus() {
+        try {
+            // Execute the command to get the socket status
+            const data = await this.executeCmd(COMMANDS.CMD_GET_SOCKET_STATUS, '');
+
+            // Parse and return the socket status in a more readable format
+            return {
+                connected: this.socket && this.socket.readyState === 'open',
+                sessionId: this.sessionId || null,
+                lastActivity: this.authTimestamp ? new Date(this.authTimestamp).toISOString() : null,
+                deviceIP: this.ip,
+                devicePort: this.port,
+                responseData: data
+            };
+        } catch (err) {
+            console.error('Error getting socket status:', err);
+            throw err;
+        }
+    }
+
+    async restart() {
+        try {
+            if (!this.socket || this.socket.readyState !== 'open') {
+                throw new Error('Socket connection is not open');
+            }
+
+            // Execute the restart command
+            const response = await this.executeCmd(COMMANDS.CMD_RESTART, '');
+
+            return {
+                success: response && response.length > 0,
+                message: response ? 'Device restart initiated successfully' : 'Failed to restart device'
+            };
+        } catch (err) {
+            console.error('Error restarting device:', err);
+            throw err;
+        }
+    }
+
+
+
     async validateSession() {
         try {
             // Check if session exists and is not expired
@@ -1176,6 +1271,308 @@ class ZTCP {
         } catch (err) {
             console.error('Session validation failed:', err);
             return false;
+        }
+    }
+
+    /**
+     * Delete a fingerprint template for a specific user and finger index
+     * @param {string} userId - User ID
+     * @param {number} fingerIndex - Finger index (0-9)
+     * @returns {Promise<boolean>} - Returns true if successful
+     */
+    async deleteFingerprintTemplate(userId, fingerIndex) {
+        try {
+            // Validate input parameters
+            if (!userId || userId.length > 9 || fingerIndex < 0 || fingerIndex > 9) {
+                throw new Error('Invalid user ID or finger index');
+            }
+
+            // Create buffer for delete info
+            const delInfo = Buffer.alloc(72);
+            delInfo.write(userId.padEnd(9, '\0'), 0, 9);
+            delInfo.writeUInt8(fingerIndex, 24);
+
+            // Send delete command
+            const reply = await this.executeCmd(COMMANDS.CMD_DEL_FPTMP, delInfo);
+
+            // Refresh data after deletion
+            await this.executeCmd(COMMANDS.CMD_REFRESHDATA, '');
+
+            return reply && reply.length >= 6;
+        } catch (err) {
+            console.error('Error deleting fingerprint template:', err);
+            throw err;
+        }
+    }
+
+    /**
+     * Delete all fingerprint templates for a user
+     * @param {number} userSn - User serial number
+     * @returns {Promise<boolean>} - Returns true if successful
+     */
+    async deleteAllFingerprintTemplates(userSn) {
+        try {
+            // Validate input parameter
+            if (userSn <= 0 || userSn > 3000) {
+                throw new Error('Invalid user serial number');
+            }
+
+            // Create buffer for delete info
+            const delInfo = Buffer.alloc(3);
+            delInfo.writeUInt16LE(userSn, 0);
+            delInfo.writeUInt8(0, 2);
+
+            // Send delete command
+            const reply = await this.executeCmd(COMMANDS.CMD_DELETE_USERTEMP, delInfo);
+
+            // Refresh data after deletion
+            await this.executeCmd(COMMANDS.CMD_REFRESHDATA, '');
+
+            return reply && reply.length >= 6;
+        } catch (err) {
+            console.error('Error deleting all fingerprint templates:', err);
+            throw err;
+        }
+    }
+
+    /**
+     * Get a fingerprint template for a specific user and finger index
+     * @param {number} userSn - User serial number
+     * @param {number} fingerIndex - Finger index (0-9)
+     * @returns {Promise<Buffer>} - Returns the fingerprint template data
+     */
+    async getFingerprintTemplate(userSn, fingerIndex) {
+        try {
+            // Validate input parameters
+            if (userSn <= 0 || userSn > 3000 || fingerIndex < 0 || fingerIndex > 9) {
+                throw new Error('Invalid user serial number or finger index');
+            }
+
+            // Free any existing buffer data
+            await this.freeData();
+
+            // Create buffer for template request
+            const reqData = Buffer.alloc(4);
+            reqData.writeUInt16LE(userSn, 0);
+            reqData.writeUInt8(fingerIndex, 2);
+            reqData.writeUInt8(0, 3); // Flag
+
+            // First, check if the template exists
+            const checkReply = await this.executeCmd(COMMANDS.CMD_USERTEMP_RRQ, reqData);
+
+            if (!checkReply || checkReply.length < 8) {
+                throw new Error('Template not found or invalid response');
+            }
+
+            // Get the size of the template from the reply
+            const size = checkReply.readUInt16LE(6);
+
+            if (size === 0) {
+                throw new Error('Template size is zero');
+            }
+
+            // Prepare to receive the template data
+            const templateData = await this.executeCmd(COMMANDS.CMD_PREPARE_DATA, reqData);
+
+            if (!templateData || templateData.length < size) {
+                throw new Error('Failed to retrieve complete template data');
+            }
+
+            // Free buffer after operation
+            await this.freeData();
+
+            return templateData;
+        } catch (err) {
+            console.error('Error getting fingerprint template:', err);
+            throw err;
+        }
+    }
+
+    /**
+     * Upload a fingerprint template for a user
+     * @param {number} userSn - User serial number
+     * @param {number} fingerIndex - Finger index (0-9)
+     * @param {Buffer} templateData - Fingerprint template data
+     * @param {number} flag - Template flag (0=invalid, 1=valid, 3=duress)
+     * @returns {Promise<boolean>} - Returns true if successful
+     */
+    async uploadFingerprintTemplate(userSn, fingerIndex, templateData, flag = 1) {
+        try {
+            // Validate input parameters
+            if (userSn <= 0 || userSn > 3000 || fingerIndex < 0 || fingerIndex > 9 || !Buffer.isBuffer(templateData)) {
+                throw new Error('Invalid parameters');
+            }
+
+            // Disable device before upload
+            await this.disableDevice();
+
+            try {
+                // Prepare data buffer
+                const prepData = Buffer.alloc(6);
+                prepData.writeUInt16LE(templateData.length, 0);
+                prepData.writeUInt32LE(0, 2);
+
+                // Send prepare data command
+                await this.executeCmd(COMMANDS.CMD_PREPARE_DATA, prepData);
+
+                // Send template data
+                await this.executeCmd(COMMANDS.CMD_DATA, templateData);
+
+                // Get checksum
+                const checksumReply = await this.executeCmd(COMMANDS.CMD_CHECKSUM_BUFFER, '');
+                if (!checksumReply || checksumReply.length < 6) {
+                    throw new Error('Failed to get checksum');
+                }
+
+                // Create template write request
+                const tmpWriteReq = Buffer.alloc(6);
+                tmpWriteReq.writeUInt16LE(userSn, 0);
+                tmpWriteReq.writeUInt8(fingerIndex, 2);
+                tmpWriteReq.writeUInt8(flag, 3);
+                tmpWriteReq.writeUInt16LE(templateData.length, 4);
+
+                // Write template
+                const writeReply = await this.executeCmd(COMMANDS.CMD_TMP_WRITE, tmpWriteReq);
+                if (!writeReply || writeReply.length < 6) {
+                    throw new Error('Failed to write template');
+                }
+
+                // Free data buffer
+                await this.freeData();
+
+                // Refresh data
+                await this.executeCmd(COMMANDS.CMD_REFRESHDATA, '');
+
+                return true;
+            } finally {
+                // Always enable device after upload attempt
+                await this.enableDevice();
+            }
+        } catch (err) {
+            console.error('Error uploading fingerprint template:', err);
+            throw err;
+        }
+    }
+
+    /**
+     * Read all fingerprint templates from the device
+     * @returns {Promise<Array>} - Returns array of template entries
+     */
+    async readAllTemplates() {
+        try {
+            // Disable device before reading
+            await this.disableDevice();
+
+            try {
+                // Send command to read all templates
+                const reply = await this.executeCmd(COMMANDS.CMD_DATA_WRRQ, Buffer.from([0x01, 0x07, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]));
+
+                if (!reply || reply.length < 8) {
+                    throw new Error('Failed to read templates');
+                }
+
+                const templates = [];
+                let offset = 4; // Skip header
+
+                // Read total size of templates
+                const totalSize = reply.readUInt32LE(offset);
+                offset += 4;
+
+                // Read each template entry
+                while (offset < reply.length) {
+                    if (reply.length - offset < 6) break; // Need at least 6 bytes for entry header
+
+                    const entrySize = reply.readUInt16LE(offset);
+                    if (entrySize < 6) break; // Invalid entry size
+
+                    const userSn = reply.readUInt16LE(offset + 2);
+                    const fingerIndex = reply.readUInt8(offset + 4);
+                    const flag = reply.readUInt8(offset + 5);
+
+                    // Extract template data
+                    const templateData = reply.slice(offset + 6, offset + entrySize);
+
+                    templates.push({
+                        userSn,
+                        fingerIndex,
+                        flag,
+                        templateData
+                    });
+
+                    offset += entrySize;
+                }
+
+                return templates;
+            } finally {
+                // Always enable device after reading
+                await this.enableDevice();
+            }
+        } catch (err) {
+            console.error('Error reading all templates:', err);
+            throw err;
+        }
+    }
+
+    /**
+     * Capture an image from the device
+     * @returns {Promise<Buffer>} - Returns the captured image data
+     */
+    async captureImage() {
+        try {
+            // Disable device before capture
+            await this.disableDevice();
+
+            try {
+                // Free any existing buffer data
+                await this.freeData();
+
+                // Send capture command
+                const captureReply = await this.executeCmd(COMMANDS.CMD_CAPTUREIMAGE, '');
+                if (!captureReply || captureReply.length < 8) {
+                    throw new Error('Failed to initiate image capture');
+                }
+
+                // Get the size of the image data
+                const size = captureReply.readUInt32LE(4);
+                if (size === 0) {
+                    throw new Error('Captured image size is zero');
+                }
+
+                // Prepare to receive the image data
+                const prepData = Buffer.alloc(8);
+                prepData.writeUInt32LE(size, 0); // Use 32-bit for size
+                prepData.writeUInt32LE(0, 4); // Reserved bytes
+
+                // Send prepare data command
+                await this.executeCmd(COMMANDS.CMD_PREPARE_DATA, prepData);
+
+                // Receive the image data in chunks
+                const MAX_CHUNK_SIZE = 1024;
+                let imageData = Buffer.alloc(0);
+                let remainingSize = size;
+
+                while (remainingSize > 0) {
+                    const chunkSize = Math.min(MAX_CHUNK_SIZE, remainingSize);
+                    const chunk = await this.executeCmd(COMMANDS.CMD_DATA, '');
+                    if (chunk && chunk.length > 0) {
+                        imageData = Buffer.concat([imageData, chunk]);
+                        remainingSize -= chunk.length;
+                    } else {
+                        throw new Error('Failed to receive image chunk');
+                    }
+                }
+
+                // Free buffer after operation
+                await this.freeData();
+
+                return imageData;
+            } finally {
+                // Always enable device after capture attempt
+                await this.enableDevice();
+            }
+        } catch (err) {
+            console.error('Error capturing image:', err);
+            throw err;
         }
     }
 

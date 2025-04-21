@@ -205,9 +205,9 @@ class ZktecoJs {
         )
     }
 
-    async setUser(uid, userid, name, password, role = 0, cardno = 0) {
+    async setUser(uid, userid, name, password = '', role = 0, cardno = 0, faceTemplate = null) {
         return await this.functionWrapper(
-            () => this.ztcp.setUser(uid, userid, name, password, role, cardno)
+            () => this.ztcp.setUser(uid, userid, name, password, role, cardno, faceTemplate)
         )
     }
 
@@ -266,6 +266,27 @@ class ZktecoJs {
         )
     }
 
+    async readAllTemplates() {
+        return await this.functionWrapper(
+            () => this.ztcp.readAllTemplates(),
+            () => this.zudp.readAllTemplates()
+        )
+    }
+
+
+    async getFingerprintTemplate(userSn, fingerIndex) {
+        return await this.functionWrapper(
+            () => this.ztcp.getFingerprintTemplate(userSn, fingerIndex),
+            () => this.zudp.getFingerprintTemplate(userSn, fingerIndex)
+        )
+    }
+
+    async uploadFingerprintTemplate(userSn, fingerIndex, template) {
+        return await this.functionWrapper(
+            () => this.ztcp.uploadFingerprintTemplate(userSn, fingerIndex, template),
+            () => this.zudp.uploadFingerprintTemplate(userSn, fingerIndex, template)
+        )
+    }
 
     async enableDevice() {
         return await this.functionWrapper(
@@ -320,6 +341,72 @@ class ZktecoJs {
         this.timer = setTimeout(cb, timer)
     }
 
+    async restart() {
+        return await this.functionWrapper(
+            () => this.ztcp.restart(),
+            () => this.zudp.restart()
+        )
+    }
+
+    async captureImage() {
+        return await this.functionWrapper(
+            () => this.ztcp.captureImage(),
+            () => this.zudp.captureImage()
+        )
+    }
+
+    // async enrollUser(userId, name, password = '', role = 0, cardno = 0) {
+    //     return await this.functionWrapper(
+    //         () => this.ztcp.enrollUser(userId, name, password, role, cardno),
+    //         () => this.zudp.enrollUser(userId, name, password, role, cardno),
+    //         'ENROLL_USER'
+    //     )
+    // }
+
+    async getRealTimeLogs(callback) {
+        return await this.functionWrapper(
+            () => this.ztcp.getRealTimeLogs(callback),
+            () => this.zudp.getRealTimeLogs(callback),
+            'GET_REAL_TIME_LOGS'
+        )
+    }
+
+    async registerFace(userId) {
+        return await this.functionWrapper(
+            () => this.ztcp.registerFace(userId),
+            () => this.zudp.registerFace(userId)
+        )
+    }
+
+    async clearAttendanceLog() {
+        return await this.functionWrapper(
+            () => this.ztcp.clearAttendanceLog(),
+            () => this.zudp.clearAttendanceLog()
+        )
+    }
+
+    async disconnect() {
+        if (this.interval) {
+            clearInterval(this.interval);
+            this.interval = null;
+        }
+
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
+
+        if (this.connectionType === 'tcp' && this.ztcp && this.ztcp.socket) {
+            this.ztcp.socket.end();
+            this.ztcp.socket = null;
+        } else if (this.connectionType === 'udp' && this.zudp && this.zudp.socket) {
+            this.zudp.socket.close();
+            this.zudp.socket = null;
+        }
+
+        this.connectionType = null;
+        return true;
+    }
 }
 
 
